@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       pages: write
       id-token: write
     needs: build
@@ -48,10 +49,10 @@ jobs:
         name: ui-generated
         path: .
     - uses: actions/configure-pages@v1
-    - uses: actions/upload-pages-artifact@v1
+    - uses: actions/upload-pages-artifact@v3
       with:
         path: .
     - id: deployment
-      uses: actions/deploy-pages@main
+      uses: actions/deploy-pages@v4
     
 
