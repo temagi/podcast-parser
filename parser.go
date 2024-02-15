@@ -38,32 +38,38 @@ func generateHTMLPage() string {
 	htmlBuilder.WriteString(`<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">`)
 	htmlBuilder.WriteString("</head><body><div class=\"container\"><h1 class=\"mt-5 mb-4\">Latest RadioRecord K&H podcast direct links</h1><table class=\"table\"><thead><tr><th>#</th><th>Date</th><th>Day of the Week</th><th>Link</th><th>Status</th></tr></thead><tbody>")
 
+	type status struct {
+		url string
+		status string
+	}
+
+
 	// Loop through previous dates and generate table rows
 	for i := 0; i < numLinks; i++ {
 		// Construct the URL for the mp3 file
 		dateStr := prevDate.Format("2006-01-02")
 		url := fmt.Sprintf("https://itunes.radiorecord.ru/tmp_audio/itunes1/hik_-_rr_%s.mp3", dateStr)
+		urlStatus := status{url, "Not Available"}
+		if urlExists(urlStatus.url) {
+			urlStatus.status = "Available"
+		} else {
+			url2 := strings.Replace(url, "itunes1", "itunes2", 1)
+			if urlExists(url2) {
+				urlStatus.url = url2
+				urlStatus.status = "Available"
+			}
+		}
 
 		htmlBuilder.WriteString("<tr>")
 		htmlBuilder.WriteString(fmt.Sprintf("<td>%d</td>", i+1))
 		htmlBuilder.WriteString(fmt.Sprintf("<td>%s</td>", prevDate.Format("2006-01-02")))
 		htmlBuilder.WriteString(fmt.Sprintf("<td>%s</td>", prevDate.Weekday().String()))
-		htmlBuilder.WriteString(fmt.Sprintf("<td><a href=\"%s\">Download file</a></td>", url))
-
-		// Check if the mp3 file is available
-		status := "Not Available"
-		if urlExists(url) {
-			status = "Available"
-			htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightgreen;\">%s</td>", status))
+		if(urlStatus.status == "Available") {
+			htmlBuilder.WriteString(fmt.Sprintf("<td><a href=\"%s\">Download file</a></td>", urlStatus.url))
+			htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightgreen;\">%s</td>", urlStatus.status))
 		} else {
-			// Try the second dynamic part if the first one is not available
-			url2 := strings.Replace(url, "itunes1", "itunes2", 1)
-			if urlExists(url2) {
-				status = "Available"
-				htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightgreen;\">%s</td>", status))
-			} else {
-				htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightcoral;\">%s</td>", status))
-			}
+			htmlBuilder.WriteString("<td>-</td>")
+			htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightcoral;\">%s</td>", urlStatus.status))
 		}
 
 		htmlBuilder.WriteString("</tr>")
