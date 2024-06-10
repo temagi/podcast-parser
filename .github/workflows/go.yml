@@ -42,7 +42,7 @@ jobs:
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'actions@github.com'
         git add statuses.json
-        git commit -m "Update statuses.json"
+        git commit -m "Update statuses.json [skip ci]"
         git push
 
   deploy:
