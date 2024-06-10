@@ -25,7 +25,7 @@ jobs:
       run: go run ./parser.go
 
     - name: Publish UI artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: ui-generated
         path: index.html
@@ -44,3 +44,34 @@ jobs:
         git add statuses.json
         git commit -m "Update statuses.json"
         git push
+
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+      
+    steps:
+    - name: Download UI artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ui-generated
+        path: .
+
+    - name: Configure GitHub Pages
+      uses: actions/configure-pages@v1
+
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: .
+
+    - id: deployment
+      name: Deploy to GitHub Pages
+      uses: actions/deploy-pages@v4
