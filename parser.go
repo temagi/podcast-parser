@@ -125,7 +125,7 @@ func main() {
 	}
 
 	// Get the current date
-	currentDate := time.Now()
+	currentDate := time.Now().AddDate(0, 0, -1)
 
 	// Map existing statuses by date for quick lookup
 	statusMap := make(map[string]Status)
