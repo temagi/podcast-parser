@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -11,60 +13,12 @@ import (
 	"time"
 )
 
-// Status represents the status of a URL.
-type Status struct {
+type PodcastStatus struct {
 	Date   string `json:"date"`
-	URL    string `json:"url"`
+	Url    string `json:"url"`
 	Status string `json:"status"`
 }
 
-// ReadStatuses reads the statuses from the JSON file.
-func ReadStatuses(filename string) ([]Status, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []Status{}, nil // Return an empty slice if the file does not exist.
-		}
-		return nil, err
-	}
-	defer file.Close()
-
-	// Check if file is empty
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if fileInfo.Size() == 0 {
-		return []Status{}, nil // Return an empty slice if the file is empty.
-	}
-
-	var statuses []Status
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&statuses); err != nil {
-		if err.Error() == "EOF" {
-			return []Status{}, nil // Return an empty slice if the file is empty.
-		}
-		return nil, err
-	}
-	return statuses, nil
-}
-
-// WriteStatuses writes the statuses to the JSON file.
-func WriteStatuses(filename string, statuses []Status) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(&statuses); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Function to check if a URL exists (returns true) or not (returns false)
 func urlExists(url string) bool {
 	resp, err := http.Head(url)
 	if err != nil {
@@ -76,109 +30,269 @@ func urlExists(url string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// Function to generate the HTML page with links to mp3 files in table format with Bootstrap styling
-func generateHTMLPage(statuses []Status) string {
-	var htmlBuilder strings.Builder
+func loadStatuses(filename string) ([]PodcastStatus, error) {
+	file, err := os.Open(filename)
+	if os.IsNotExist(err) {
+		return []PodcastStatus{}, nil
+	} else if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
-	// HTML page header with Bootstrap CSS included
-	htmlBuilder.WriteString("<!DOCTYPE html><html><head><title>Latest RadioRecord K&H podcast direct links</title>")
-	htmlBuilder.WriteString(`<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">`)
-	htmlBuilder.WriteString("</head><body><div class=\"container\"><h1 class=\"mt-5 mb-4\">Latest RadioRecord K&H podcast direct links</h1><table class=\"table\"><thead><tr><th>#</th><th>Date</th><th>Day of the Week</th><th>Link</th><th>Status</th></tr></thead><tbody>")
+	var statuses []PodcastStatus
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&statuses)
+	if err != nil {
+		if err == io.EOF {
+			return []PodcastStatus{}, nil
+		}
+		return nil, err
+	}
 
-	// Loop through statuses and generate table rows
-	for i, status := range statuses {
-		date, err := time.Parse("2006-01-02", status.Date)
-		if err != nil {
-			fmt.Println("Error parsing date:", err)
+	return statuses, nil
+}
+
+func saveStatuses(filename string, statuses []PodcastStatus) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	return encoder.Encode(statuses)
+}
+
+func updatePodcastStatuses(statuses []PodcastStatus, numDays int, urlTemplate string, filename string) ([]PodcastStatus, error) {
+	prevDate := time.Now().AddDate(0, 0, -1)
+	statusMap := make(map[string]PodcastStatus)
+
+	for _, status := range statuses {
+		statusMap[status.Date] = status
+	}
+
+	for i := 0; i < numDays; i++ {
+		dateStr := prevDate.Format("2006-01-02")
+		if _, exists := statusMap[dateStr]; exists {
+			prevDate = prevDate.AddDate(0, 0, -1)
 			continue
 		}
 
-		htmlBuilder.WriteString("<tr>")
-		htmlBuilder.WriteString(fmt.Sprintf("<td>%d</td>", i+1))
-		htmlBuilder.WriteString(fmt.Sprintf("<td>%s</td>", status.Date))
-		htmlBuilder.WriteString(fmt.Sprintf("<td>%s</td>", date.Weekday().String()))
-		if status.Status == "Available" {
-			htmlBuilder.WriteString(fmt.Sprintf("<td><a href=\"%s\">Download file</a></td>", template.HTMLEscapeString(status.URL)))
-			htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightgreen;\">%s</td>", status.Status))
+		url := fmt.Sprintf(urlTemplate, dateStr)
+		status := "Not Available"
+		if urlExists(url) {
+			status = "Available"
 		} else {
-			htmlBuilder.WriteString("<td>-</td>")
-			htmlBuilder.WriteString(fmt.Sprintf("<td style=\"background-color: lightcoral;\">%s</td>", status.Status))
+			url2 := strings.Replace(url, "itunes1", "itunes2", 1)
+			if urlExists(url2) {
+				url = url2
+				status = "Available"
+			}
 		}
-		htmlBuilder.WriteString("</tr>")
+
+		statusMap[dateStr] = PodcastStatus{
+			Date:   dateStr,
+			Url:    url,
+			Status: status,
+		}
+
+		prevDate = prevDate.AddDate(0, 0, -1)
 	}
 
-	// HTML page footer
-	htmlBuilder.WriteString("</tbody></table></div></body></html>")
+	statuses = make([]PodcastStatus, 0, len(statusMap))
+	for _, status := range statusMap {
+		statuses = append(statuses, status)
+	}
+
+	// Sort statuses by date in descending order
+	sort.Slice(statuses, func(i, j int) bool {
+		dateI, _ := time.Parse("2006-01-02", statuses[i].Date)
+		dateJ, _ := time.Parse("2006-01-02", statuses[j].Date)
+		return dateI.After(dateJ)
+	})
+
+	err := saveStatuses(filename, statuses)
+	return statuses, err
+}
+
+func updateRTStatuses(statuses []PodcastStatus, numPodcasts int, latestPodcast int, filename string) ([]PodcastStatus, error) {
+	statusMap := make(map[string]PodcastStatus)
+
+	for _, status := range statuses {
+		statusMap[status.Date] = status
+	}
+
+	for i := 0; i < numPodcasts; i++ {
+		podcastNumber := latestPodcast - i
+		dateStr := fmt.Sprintf("Podcast %d", podcastNumber)
+		if _, exists := statusMap[dateStr]; exists {
+			continue
+		}
+
+		url := fmt.Sprintf("https://cdn.radio-t.com/rt_podcast%d.mp3", podcastNumber)
+		status := "Not Available"
+		if urlExists(url) {
+			status = "Available"
+		}
+
+		statusMap[dateStr] = PodcastStatus{
+			Date:   dateStr,
+			Url:    url,
+			Status: status,
+		}
+	}
+
+	statuses = make([]PodcastStatus, 0, len(statusMap))
+	for _, status := range statusMap {
+		statuses = append(statuses, status)
+	}
+
+	// Sort statuses by date (podcast number) in descending order
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].Date > statuses[j].Date
+	})
+
+	err := saveStatuses(filename, statuses)
+	return statuses, err
+}
+
+func generateHTMLPage(khStatuses, rtStatuses []PodcastStatus) string {
+	const tpl = `
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Latest Podcasts</title>
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+	<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+	<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</head>
+<body>
+<div class="container">
+	<h1 class="mt-5 mb-4">Latest Podcasts</h1>
+	<ul class="nav nav-tabs" id="myTab" role="tablist">
+	  <li class="nav-item">
+		<a class="nav-link active" id="kh-tab" data-toggle="tab" href="#kh" role="tab" aria-controls="kh" aria-selected="true">K&H</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" id="rt-tab" data-toggle="tab" href="#rt" role="tab" aria-controls="rt" aria-selected="false">Radio-T</a>
+	  </li>
+	</ul>
+	<div class="tab-content" id="myTabContent">
+	  <div class="tab-pane fade show active" id="kh" role="tabpanel" aria-labelledby="kh-tab">
+		<table class="table mt-4">
+			<thead>
+				<tr><th>#</th><th>Date</th><th>Day of the Week</th><th>Link</th><th>Status</th></tr>
+			</thead>
+			<tbody>
+				{{range $index, $status := .KH}}
+				<tr>
+					<td>{{$index}}</td>
+					<td>{{$status.Date}}</td>
+					<td>{{(parseTime $status.Date).Weekday}}</td>
+					{{if eq $status.Status "Available"}}
+					<td><a href="{{$status.Url}}">Download file</a></td>
+					<td style="background-color: lightgreen;">{{$status.Status}}</td>
+					{{else}}
+					<td>-</td>
+					<td style="background-color: lightcoral;">{{$status.Status}}</td>
+					{{end}}
+				</tr>
+				{{end}}
+			</tbody>
+		</table>
+	  </div>
+	  <div class="tab-pane fade" id="rt" role="tabpanel" aria-labelledby="rt-tab">
+		<table class="table mt-4">
+			<thead>
+				<tr><th>#</th><th>Date</th><th>Link</th><th>Status</th></tr>
+			</thead>
+			<tbody>
+				{{range $index, $status := .RT}}
+				<tr>
+					<td>{{$index}}</td>
+					<td>{{$status.Date}}</td>
+					{{if eq $status.Status "Available"}}
+					<td><a href="{{$status.Url}}">Download file</a></td>
+					<td style="background-color: lightgreen;">{{$status.Status}}</td>
+					{{else}}
+					<td>-</td>
+					<td style="background-color: lightcoral;">{{$status.Status}}</td>
+					{{end}}
+				</tr>
+				{{end}}
+			</tbody>
+		</table>
+	  </div>
+	</div>
+</div>
+</body>
+</html>
+`
+	funcMap := template.FuncMap{
+		"parseTime": func(dateStr string) time.Time {
+			t, _ := time.Parse("2006-01-02", dateStr)
+			return t
+		},
+	}
+
+	tmpl, err := template.New("webpage").Funcs(funcMap).Parse(tpl)
+	if err != nil {
+		panic(err)
+	}
+
+	data := struct {
+		KH []PodcastStatus
+		RT []PodcastStatus
+	}{
+		KH: khStatuses,
+		RT: rtStatuses,
+	}
+
+	var htmlBuilder strings.Builder
+	writer := bufio.NewWriter(&htmlBuilder)
+	err = tmpl.Execute(writer, data)
+	if err != nil {
+		panic(err)
+	}
+	writer.Flush()
 
 	return htmlBuilder.String()
 }
 
 func main() {
-	const filename = "statuses.json"
-	const numLinks = 15
-
-	// Read existing statuses from the JSON file
-	statuses, err := ReadStatuses(filename)
+	// Load statuses
+	khStatuses, err := loadStatuses("statuses.json")
 	if err != nil {
-		fmt.Println("Error reading statuses:", err)
+		fmt.Println("Error reading KH statuses:", err)
+		return
+	}
+	rtStatuses, err := loadStatuses("rt_statuses.json")
+	if err != nil {
+		fmt.Println("Error reading RT statuses:", err)
 		return
 	}
 
-	// Get the current date
-	currentDate := time.Now().AddDate(0, 0, -1)
-
-	// Map existing statuses by date for quick lookup
-	statusMap := make(map[string]Status)
-	for _, status := range statuses {
-		statusMap[status.Date] = status
-	}
-
-	// Loop through the last numLinks days and update statuses if necessary
-	for i := 0; i < numLinks; i++ {
-		date := currentDate.AddDate(0, 0, -i)
-		dateStr := date.Format("2006-01-02")
-
-		// Check if the status for this date is already known
-		if _, exists := statusMap[dateStr]; exists {
-			continue
-		}
-
-		// Construct the URL for the mp3 file
-		url := fmt.Sprintf("https://itunes.radiorecord.ru/tmp_audio/itunes1/hik_-_rr_%s.mp3", dateStr)
-		urlStatus := Status{Date: dateStr, URL: url, Status: "Not Available"}
-		if urlExists(url) {
-			urlStatus.Status = "Available"
-		} else {
-			url2 := strings.Replace(url, "itunes1", "itunes2", 1)
-			if urlExists(url2) {
-				urlStatus.URL = url2
-				urlStatus.Status = "Available"
-			}
-		}
-
-		// Update the status map
-		statusMap[dateStr] = urlStatus
-	}
-
-	// Convert the status map back to a slice
-	var updatedStatuses []Status
-	for _, status := range statusMap {
-		updatedStatuses = append(updatedStatuses, status)
-	}
-
-	// Sort statuses by date in descending order (newest first)
-	sort.Slice(updatedStatuses, func(i, j int) bool {
-		return updatedStatuses[i].Date > updatedStatuses[j].Date
-	})
-
-	// Write the updated statuses to the JSON file
-	if err := WriteStatuses(filename, updatedStatuses); err != nil {
-		fmt.Println("Error writing statuses:", err)
+	// Update K&H podcast statuses
+	khStatuses, err = updatePodcastStatuses(khStatuses, 14, "https://itunes.radiorecord.ru/tmp_audio/itunes1/hik_-_rr_%s.mp3", "statuses.json")
+	if err != nil {
+		fmt.Println("Error updating KH statuses:", err)
 		return
+	}
+
+	// Update RT podcast statuses if it's Sunday and 11 AM
+	now := time.Now()
+	if now.Weekday() == time.Sunday && now.Hour() == 11 {
+		latestPodcast := 913 // This should be dynamically determined if possible
+		rtStatuses, err = updateRTStatuses(rtStatuses, 1, latestPodcast, "rt_statuses.json")
+		if err != nil {
+			fmt.Println("Error updating RT statuses:", err)
+			return
+		}
 	}
 
 	// Generate HTML page content
-	htmlContent := generateHTMLPage(updatedStatuses)
+	htmlContent := generateHTMLPage(khStatuses, rtStatuses)
 
 	// Write HTML content to a file
 	file, err := os.Create("index.html")
@@ -188,7 +302,6 @@ func main() {
 	}
 	defer file.Close()
 
-	// Write HTML content to the file
 	_, err = file.WriteString(htmlContent)
 	if err != nil {
 		fmt.Println("Error writing to HTML file:", err)

@@ -6,7 +6,8 @@ on:
   pull_request:
     branches: [ "main" ]
   schedule:
-    - cron: '0 10 * * *'
+    - cron: '0 8 * * *'
+    - cron: '0 11 * * 0'  # Sunday at 11:00 UTC
 
 jobs:
   build:
@@ -35,14 +36,15 @@ jobs:
       id: check_changes
       run: |
         git diff --exit-code --quiet statuses.json || echo "::set-output name=changed::true"
+        git diff --exit-code --quiet rt_statuses.json || echo "::set-output name=changed_rt::true"
 
     - name: Commit and push changes to statuses.json
-      if: steps.check_changes.outputs.changed == 'true'
+      if: steps.check_changes.outputs.changed == 'true' || steps.check_changes.outputs.changed_rt == 'true'
       run: |
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'actions@github.com'
-        git add statuses.json
-        git commit -m "Update statuses.json [skip ci]"
+        git add statuses.json rt_statuses.json
+        git commit -m "Update statuses.json and rt_statuses.json [skip ci]"
         git push
 
   deploy:
