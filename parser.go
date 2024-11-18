@@ -115,30 +115,36 @@ func updatePodcastStatuses(statuses []PodcastStatus, numDays int, urlTemplate st
 	return statuses, err
 }
 
-func updateRTStatuses(statuses []PodcastStatus, numPodcasts int, latestPodcast int, filename string) ([]PodcastStatus, error) {
+func updateRTStatuses(statuses []PodcastStatus, filename string) ([]PodcastStatus, error) {
 	statusMap := make(map[string]PodcastStatus)
 
 	for _, status := range statuses {
 		statusMap[status.Date] = status
 	}
 
-	for i := 0; i < numPodcasts; i++ {
-		podcastNumber := latestPodcast - i
-		dateStr := fmt.Sprintf("Podcast %d", podcastNumber)
-		if _, exists := statusMap[dateStr]; exists {
-			continue
+	// Find the latest podcast number
+	latestPodcast := 0
+	for _, status := range statuses {
+		var podcastNumber int
+		_, err := fmt.Sscanf(status.Date, "Podcast %d", &podcastNumber)
+		if err == nil && podcastNumber > latestPodcast {
+			latestPodcast = podcastNumber
 		}
+	}
 
-		url := fmt.Sprintf("https://cdn.radio-t.com/rt_podcast%d.mp3", podcastNumber)
+	// Check the next podcast
+	nextPodcast := latestPodcast + 1
+	dateStr := fmt.Sprintf("Podcast %d", nextPodcast)
+	if _, exists := statusMap[dateStr]; !exists {
+		url := fmt.Sprintf("https://cdn.radio-t.com/rt_podcast%d.mp3", nextPodcast)
 		status := "Not Available"
 		if urlExists(url) {
 			status = "Available"
-		}
-
-		statusMap[dateStr] = PodcastStatus{
-			Date:   dateStr,
-			Url:    url,
-			Status: status,
+			statusMap[dateStr] = PodcastStatus{
+				Date:   dateStr,
+				Url:    url,
+				Status: status,
+			}
 		}
 	}
 
