@@ -289,8 +289,7 @@ func main() {
 	// Update RT podcast statuses if it's Sunday and 11 AM
 	now := time.Now()
 	if now.Weekday() == time.Sunday && now.Hour() == 11 {
-		latestPodcast := 913 // This should be dynamically determined if possible
-		rtStatuses, err = updateRTStatuses(rtStatuses, 1, latestPodcast, "rt_statuses.json")
+		rtStatuses, err = updateRTStatuses(rtStatuses, "rt_statuses.json")
 		if err != nil {
 			fmt.Println("Error updating RT statuses:", err)
 			return
