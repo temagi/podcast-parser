@@ -14,20 +14,40 @@ import (
 )
 
 type PodcastStatus struct {
-	Date   string `json:"date"`
-	Url    string `json:"url"`
-	Status string `json:"status"`
+	Date          string `json:"date"`
+	Url           string `json:"url"`
+	Status        string `json:"status"`
+	PodcastNumber *int   `json:"number,omitempty"`
 }
 
 func urlExists(url string) bool {
-	resp, err := http.Head(url)
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Allow up to 10 redirects
+			if len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+
+	fmt.Println("Checking URL:", url)
+	resp, err := client.Head(url)
 	if err != nil {
 		fmt.Println("Error checking URL:", err)
 		return false
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	if len(resp.Request.URL.String()) > len(url) {
+		fmt.Println("Redirection occurred:", resp.Request.URL.String())
+	} else {
+		fmt.Println("No redirection.")
+	}
+
+	result := resp.StatusCode == http.StatusOK
+	fmt.Printf("URL: %s, Status Code: %d, Exists: %t\n", url, resp.StatusCode, result)
+	return result
 }
 
 func loadStatuses(filename string) ([]PodcastStatus, error) {
@@ -123,13 +143,14 @@ func updateRTStatuses(statuses []PodcastStatus, filename string) ([]PodcastStatu
 	}
 
 	// Find the latest podcast number
-	latestPodcast := 0
+	latestPodcast := -1
 	for _, status := range statuses {
-		var podcastNumber int
-		_, err := fmt.Sscanf(status.Date, "Podcast %d", &podcastNumber)
-		if err == nil && podcastNumber > latestPodcast {
-			latestPodcast = podcastNumber
+		if status.PodcastNumber != nil && *status.PodcastNumber > latestPodcast {
+			latestPodcast = *status.PodcastNumber
 		}
+	}
+	if latestPodcast == -1 {
+		latestPodcast = 0
 	}
 
 	// Check the next podcast
@@ -141,9 +162,10 @@ func updateRTStatuses(statuses []PodcastStatus, filename string) ([]PodcastStatu
 		if urlExists(url) {
 			status = "Available"
 			statusMap[dateStr] = PodcastStatus{
-				Date:   dateStr,
-				Url:    url,
-				Status: status,
+				Date:          dateStr,
+				Url:           url,
+				Status:        status,
+				PodcastNumber: &nextPodcast,
 			}
 		}
 	}
@@ -153,9 +175,9 @@ func updateRTStatuses(statuses []PodcastStatus, filename string) ([]PodcastStatu
 		statuses = append(statuses, status)
 	}
 
-	// Sort statuses by date (podcast number) in descending order
+	// Sort statuses by podcast number in descending order
 	sort.Slice(statuses, func(i, j int) bool {
-		return statuses[i].Date > statuses[j].Date
+		return *statuses[i].PodcastNumber > *statuses[j].PodcastNumber
 	})
 
 	err := saveStatuses(filename, statuses)
